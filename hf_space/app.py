@@ -15,7 +15,7 @@ class Health(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Big Pickle is alive")
+        self.wfile.write(b"SteamOsint is alive")
 
     def log_message(self, *args):
         pass

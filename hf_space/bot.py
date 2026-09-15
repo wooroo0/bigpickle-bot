@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 
@@ -20,7 +21,7 @@ TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 PROXY = os.getenv("PROXY", "").strip() or os.getenv("HTTPS_PROXY", "").strip() or os.getenv("HTTP_PROXY", "").strip()
 
 HELP_TEXT = (
-    "🎯 <b>Big Pickle — Steam OSINT бот</b>\n\n"
+    "🎯 <b>SteamOsint — Steam OSINT бот</b>\n\n"
     "Кидай SteamID64 или ссылку на профиль — получу аналитическую сводку "
     "рисков по игроку (Rust / CS2 / Dota 2): часы, статус, баны, трекеры.\n\n"
     "Форматы ввода:\n"
@@ -37,7 +38,7 @@ HELP_TEXT = (
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🥒 Привет, я <b>Big Pickle</b> — элитный аналитик Steam-профилей.\n"
+        "Привет, я <b>SteamOsint</b> — элитный аналитик Steam-профилей.\n"
         "Отправь SteamID64 или ссылку на профиль — соберу телеметрию и оценку рисков.\n\n"
         + HELP_TEXT,
         parse_mode=ParseMode.HTML,
@@ -103,8 +104,25 @@ def main():
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("analyze", analyze))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, analyze))
-    print("Big Pickle bot started. Ctrl+C to stop.")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+    max_seconds = float(os.getenv("BOT_MAX_SECONDS", "0") or 0)
+    if max_seconds <= 0:
+        print("SteamOsint bot started. Ctrl+C to stop.")
+        app.run_polling(allowed_updates=Update.ALL_TYPES)
+        return
+
+    asyncio.run(_run_timed(app, max_seconds))
+
+
+async def _run_timed(app: Application, max_seconds: float):
+    async with app:
+        await app.start()
+        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        print(f"SteamOsint bot started. Running {int(max_seconds)}s, then clean exit.")
+        await asyncio.sleep(max_seconds)
+        logging.getLogger(__name__).info("Max runtime reached. Stopping cleanly.")
+        await app.updater.stop()
+        await app.stop()
 
 
 if __name__ == "__main__":

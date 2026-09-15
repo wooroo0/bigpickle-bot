@@ -11,23 +11,23 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-class BigPickleError(Exception):
+class SteamOsintError(Exception):
     pass
 
 
-class InvalidInputError(BigPickleError):
+class InvalidInputError(SteamOsintError):
     pass
 
 
-class ProfileNotFoundError(BigPickleError):
+class ProfileNotFoundError(SteamOsintError):
     pass
 
 
-class SteamUnavailableError(BigPickleError):
+class SteamUnavailableError(SteamOsintError):
     pass
 
 
-USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 BigPickle-osint-bot/1.0"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 SteamOsint-bot/1.0"
 TIMEOUT = 20
 STEAM_API_KEY = os.getenv("STEAM_API_KEY", "")
 
@@ -363,23 +363,20 @@ def build_card(profile):
         L.append("    Регистрационные данные: %s" % html.escape(profile["realname"]))
     L.append("")
 
-    L.append("⏱️ Игровая телеметрия (Часы и активность)")
+    L.append("⏱️ Часы в играх")
     if private:
-        L.append("    Основная игра (Rust/CS2/Dota 2): скрыто приватностью")
+        L.append("    Всего наиграно: скрыто приватностью")
     else:
-        focus = {k: h for k, h in profile["hours"].items() if k in ("Rust", "CS2", "Dota 2")}
-        if focus:
-            for label, h in focus.items():
-                L.append("    %s: <b>%s</b>" % (label, _fmt_hours(h)))
-            others = [(k, h) for k, h in profile["hours"].items() if k not in ("Rust", "CS2", "Dota 2")]
-            if others:
-                top = [k for k, _ in sorted(others, key=lambda x: -x[1])[:3]]
-                L.append("    Другое: %s" % ", ".join(html.escape(t) for t in top))
-        elif profile["hours"]:
-            top = sorted(profile["hours"].items(), key=lambda x: -x[1])[:3]
-            L.append("    Топ игр: %s" % "; ".join("%s (%s)" % (html.escape(n), _fmt_hours(h)) for n, h in top))
+        hours = profile["hours"]
+        if hours:
+            L.append("    Всего наиграно: <b>%s</b>" % _fmt_hours(sum(hours.values())))
+            for label, h in sorted(hours.items(), key=lambda x: -x[1])[:6]:
+                L.append("    %s: <b>%s</b>" % (html.escape(label), _fmt_hours(h)))
+            extra = len(hours) - 6
+            if extra > 0:
+                L.append("    … и ещё %d игр" % extra)
         else:
-            L.append("    Основная игра (Rust/CS2/Dota 2): нет публичных часов")
+            L.append("    Часы в играх: нет публичных данных")
     if profile["hours_source"] == "recent":
         L.append("    (часы — за последнюю активность, полный список — со Steam API key)")
     state = html.escape(profile["state_message"] or "—")
@@ -416,7 +413,7 @@ def build_card(profile):
         L.append("    Ограниченный аккаунт (Limited): Да")
     L.append("")
 
-    L.append("🤖 Анализ рисков (Big Pickle AI-оценка)")
+    L.append("🤖 Анализ рисков (SteamOsint AI-оценка)")
     L.append("    Уровень риска: <b>%s</b> (оценка %.1f)" % (risk["verdict"], risk["score"]))
     for f in risk["flags"]:
         L.append("    • %s" % html.escape(f))
