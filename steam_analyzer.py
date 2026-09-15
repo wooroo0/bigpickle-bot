@@ -363,30 +363,30 @@ def build_card(profile):
         L.append("    Регистрационные данные: %s" % html.escape(profile["realname"]))
     L.append("")
 
-    L.append("⏱️ Часы в играх")
+    L.append("⏱️ Часы по играм (за всё время)")
     if private:
-        L.append("    Всего наиграно: скрыто приватностью")
+        L.append("    Скрыто приватностью")
     else:
         hours = profile["hours"]
         if hours:
-            L.append("    Всего наиграно: <b>%s</b>" % _fmt_hours(sum(hours.values())))
-            for label, h in sorted(hours.items(), key=lambda x: -x[1])[:6]:
-                L.append("    %s: <b>%s</b>" % (html.escape(label), _fmt_hours(h)))
-            extra = len(hours) - 6
-            if extra > 0:
-                L.append("    … и ещё %d игр" % extra)
+            focus_order = ("Rust", "CS2", "Dota 2")
+            rows = []
+            for k in focus_order:
+                if k in hours:
+                    rows.append("%s: <b>%s</b>" % (k, _fmt_hours(hours[k])))
+            others = sorted(
+                ((k, h) for k, h in hours.items() if k not in focus_order),
+                key=lambda x: -x[1],
+            )[:3]
+            for k, h in others:
+                rows.append("%s: <b>%s</b>" % (html.escape(k), _fmt_hours(h)))
+            rows.append("Всего: <b>%s</b>" % _fmt_hours(sum(hours.values())))
+            L.append("<blockquote>%s</blockquote>" % "\n".join(rows))
         else:
-            L.append("    Часы в играх: нет публичных данных")
+            L.append("    Нет публичных часов")
     if profile["hours_source"] == "recent":
         L.append("    (часы — за последнюю активность, полный список — со Steam API key)")
     state = html.escape(profile["state_message"] or "—")
-    if profile["hours_2wk"]:
-        try:
-            h2 = float(profile["hours_2wk"])
-            if h2 > 0:
-                state = "%s · наиграно %.0f ч за 2 недели" % (state, h2)
-        except ValueError:
-            pass
     L.append("    Последняя активность: %s" % state)
     L.append("")
 
@@ -423,9 +423,8 @@ def build_card(profile):
     L.append("🔍 Внешние архивы и трекеры")
     L.append("    • SteamID.uk: <a href=\"https://steamid.uk/profile/%s\">Открыть профиль</a> (VAC / EAC / BattlEye / торговля)" % sid)
     L.append("    • RustBans: <a href=\"https://rustbans.com/results.php?steam_id=%s\">Проверить в базе Rust</a>" % sid)
-    q = urllib.parse.quote(profile["name"] or sid)
-    L.append("    • Faceit: <a href=\"https://www.google.com/search?q=%%22%s%%22+site%%3Afaceit.com%%2Fen%%2Fplayers\">Поиск по Faceit</a>" % q)
-    L.append("    • SteamRep закрыт (sunset) — репутацию смотри в SteamID.uk / Google по нику")
-    L.append("    • BattlEye / EAC: агрегировано в SteamID.uk (вкладка Bans)")
+    L.append("    • Dotabuff: <a href=\"https://dotabuff.com/players/%s\">Статистика Dota 2</a> (по SteamID)" % sid)
+    L.append("    • SteamRep закрыт (sunset) — репутацию смотри в SteamID.uk / Steam")
+    L.append("    • Faceit: keyless API закрыт, профили не индексируются — проверяй CS2 вручную по нику")
 
     return "\n".join(L)
