@@ -1,0 +1,28 @@
+name: bigpickle-bot
+
+on:
+  schedule:
+    - cron: "15 */6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: bigpickle-bot
+  cancel-in-progress: true
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install --quiet -r requirements.txt
+      - name: Run bot
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
+          BOT_MAX_SECONDS: "21300"
+        run: python bot.py

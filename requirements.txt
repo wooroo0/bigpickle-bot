@@ -1,0 +1,4 @@
+python-telegram-bot>=21
+requests>=2.31
+curl_cffi>=0.7
+python-dotenv>=1.0
