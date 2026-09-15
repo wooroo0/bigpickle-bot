@@ -24,5 +24,6 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           STEAM_API_KEY: ${{ secrets.STEAM_API_KEY }}
+          FACEIT_API_KEY: ${{ secrets.FACEIT_API_KEY }}
           BOT_MAX_SECONDS: "21300"
         run: python bot.py

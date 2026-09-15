@@ -30,6 +30,7 @@ class SteamUnavailableError(SteamOsintError):
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:130.0) Gecko/20100101 SteamOsint-bot/1.0"
 TIMEOUT = 20
 STEAM_API_KEY = os.getenv("STEAM_API_KEY", "")
+FACEIT_API_KEY = os.getenv("FACEIT_API_KEY", "")
 
 try:
     from curl_cffi import requests as _http
@@ -53,14 +54,19 @@ FOCUS_ALIASES = {
 }
 
 
-def _get(url, params=None, _attempts=3):
+def _get(url, params=None, _attempts=3, _bearer=None, _json=False):
     kwargs = {"timeout": TIMEOUT}
     if _HTTP_IMPRESSONATE:
         kwargs["impersonate"] = "chrome"
+    headers = {"User-Agent": USER_AGENT}
+    if _bearer:
+        headers["Authorization"] = "Bearer %s" % _bearer
+    if _json:
+        headers["Accept"] = "application/json"
     last_exc = None
     for attempt in range(_attempts):
         try:
-            resp = _http.get(url, params=params, headers={"User-Agent": USER_AGENT}, **kwargs)
+            resp = _http.get(url, params=params, headers=headers, **kwargs)
             resp.raise_for_status()
             return resp.text
         except Exception as exc:
@@ -80,8 +86,8 @@ def _tag(text, name):
     return None
 
 
-def _get_json(url, params=None):
-    return json.loads(_get(url, params=params))
+def _get_json(url, params=None, _bearer=None):
+    return json.loads(_get(url, params=params, _bearer=_bearer, _json=True))
 
 
 def resolve_steamid(raw: str) -> str:
@@ -184,6 +190,28 @@ def _get_recent_hours(steamid64):
     return hours, weeks
 
 
+def _get_faceit_player(steamid64):
+    if not FACEIT_API_KEY:
+        return None
+    for game in ("cs2", "csgo"):
+        try:
+            data = _get_json(
+                "https://open.faceit.com/data/v4/players",
+                params={"game": game, "game_player_id": steamid64},
+                _bearer=FACEIT_API_KEY,
+            )
+        except Exception:
+            continue
+        p = data.get("payload") or data.get("player")
+        if p:
+            return {
+                "player_id": p.get("player_id"),
+                "nickname": p.get("nickname") or p.get("faceit_nickname"),
+                "faceit_url": p.get("faceit_url"),
+            }
+    return None
+
+
 def _get_player_bans(steamid64):
     if not STEAM_API_KEY:
         return None
@@ -219,6 +247,7 @@ def fetch_profile(steamid64: str) -> dict:
         privacy = "private"
 
     ban = _get_player_bans(sid)
+    faceit = _get_faceit_player(sid)
     vac_banned = bool(_tag(xml, "vacBanned") and _tag(xml, "vacBanned") != "0")
     if ban is not None:
         vac_banned = ban["vac_banned"]
@@ -266,6 +295,7 @@ def fetch_profile(steamid64: str) -> dict:
         "trade_ban": trade_ban,
         "community_banned": community_banned,
         "has_ban_api": ban is not None,
+        "faceit": faceit,
         "hours": hours,
         "weeks_hours": weeks,
         "hours_source": hours_source,
@@ -449,6 +479,17 @@ def build_card(profile):
     L.append("    • RustBans: <a href=\"https://rustbans.com/results.php?steam_id=%s\">Проверить в базе Rust</a>" % sid)
     L.append("    • Dotabuff: <a href=\"https://dotabuff.com/players/%s\">Статистика Dota 2</a> (по SteamID)" % sid)
     L.append("    • SteamRep закрыт (sunset) — репутацию смотри в SteamID.uk / Steam")
-    L.append("    • Faceit: keyless API закрыт, профили не индексируются — проверяй CS2 вручную по нику")
+    faceit = profile.get("faceit")
+    if faceit:
+        fnick = html.escape(faceit.get("nickname") or "игрок")
+        furl = faceit.get("faceit_url")
+        if furl and furl.startswith("http"):
+            L.append("    • Faceit: <a href=\"%s\">%s</a> (найден по SteamID)" % (html.escape(furl), fnick))
+        else:
+            L.append("    • Faceit: игрок найден (%s)" % fnick)
+    elif FACEIT_API_KEY:
+        L.append("    • Faceit: игрок не найден (проверено по SteamID)")
+    else:
+        L.append("    • Faceit: включи проверку — бесплатный ключ на developers.faceit.com")
 
     return "\n".join(L)
