@@ -117,7 +117,7 @@ def _label(game_name, appid):
 
 def _get_game_hours(steamid64):
     if not STEAM_API_KEY:
-        return {}
+        return {}, {}
     try:
         data = _get_json(
             "https://api.steampowered.com/IPlayerService/GetOwnedGames/v0001/",
@@ -130,15 +130,18 @@ def _get_game_hours(steamid64):
             },
         )
     except Exception:
-        return {}
+        return {}, {}
     hours = {}
+    weeks = {}
     for g in (data.get("response", {}).get("games") or []):
-        hrs = (g.get("playtime_forever") or 0) / 3600.0
-        if hrs < 0.1:
-            continue
         label = _label(g.get("name"), g.get("appid"))
-        hours[label] = hrs
-    return hours
+        hrs = (g.get("playtime_forever") or 0) / 60.0
+        if hrs >= 0.1:
+            hours[label] = hrs
+        w2 = (g.get("playtime_2weeks") or 0) / 60.0
+        if w2 >= 0.1:
+            weeks[label] = w2
+    return hours, weeks
 
 
 _RECENT_GAME_RE = re.compile(
@@ -153,22 +156,32 @@ def _get_recent_hours(steamid64):
     try:
         html_page = _get("https://steamcommunity.com/profiles/%s" % steamid64)
     except SteamUnavailableError:
-        return {}
+        return {}, {}
     hours = {}
+    weeks = {}
     for m in _RECENT_GAME_RE.finditer(html_page):
         appid = int(m.group(1))
         details = re.sub(r"<[^>]+>", " ", m.group(2))
-        hfound = re.search(r"([\d.,]+)\s*hrs?\s*on\s*record", details, re.I)
+        text = html.unescape(details)
         name = html.unescape(re.sub(r"<[^>]+>", "", m.group(3))).strip()
-        if not hfound or not name:
-            continue
-        try:
-            hrs = float(hfound.group(1).replace(",", "."))
-        except ValueError:
+        if not name:
             continue
         label = _label(name, appid)
-        hours[label] = max(hours.get(label, 0.0), hrs)
-    return hours
+        hfound = re.search(r"([\d.,]+)\s*hrs?\s*on\s*record", text, re.I)
+        wfound = re.search(r"([\d.,]+)\s*hrs?\s*last\s*two\s*weeks", text, re.I)
+        if hfound:
+            try:
+                hrs = float(hfound.group(1).replace(",", "."))
+                hours[label] = max(hours.get(label, 0.0), hrs)
+            except ValueError:
+                pass
+        if wfound:
+            try:
+                hrs = float(wfound.group(1).replace(",", "."))
+                weeks[label] = max(weeks.get(label, 0.0), hrs)
+            except ValueError:
+                pass
+    return hours, weeks
 
 
 def _get_player_bans(steamid64):
@@ -219,13 +232,22 @@ def fetch_profile(steamid64: str) -> dict:
         community_banned = (_tag(xml, "communityBanned") or "0") != "0"
         trade_ban = (_tag(xml, "tradeBanState") or "none").lower()
 
-    hours = _get_game_hours(sid) if privacy == "public" else {}
-    hours_source = "api" if hours else None
+    hours = {}
+    weeks = {}
+    hours_source = None
     if privacy == "public":
-        for k, v in _get_recent_hours(sid).items():
+        api_h, api_w = _get_game_hours(sid)
+        rec_h, rec_w = _get_recent_hours(sid)
+        if api_h:
+            hours_source = "api"
+        hours.update(api_h)
+        for k, v in rec_h.items():
             if k not in hours:
                 hours[k] = v
                 hours_source = hours_source or "recent"
+        weeks.update(api_w)
+        for k, v in rec_w.items():
+            weeks.setdefault(k, v)
 
     return {
         "steamid64": sid,
@@ -245,6 +267,7 @@ def fetch_profile(steamid64: str) -> dict:
         "community_banned": community_banned,
         "has_ban_api": ban is not None,
         "hours": hours,
+        "weeks_hours": weeks,
         "hours_source": hours_source,
     }
 
@@ -296,14 +319,15 @@ def analyze(profile):
         score += 0.5
         flags.append("Ограниченный аккаунт (Limited) — маркер смурфа/свежего профиля")
 
-    if profile["hours_2wk"]:
+    h2_total = sum(profile.get("weeks_hours", {}).values())
+    if not h2_total:
         try:
-            h2 = float(profile["hours_2wk"])
-            if h2 >= 60:
-                score += 0.5
-                flags.append("Интенсивная активность: %.0f ч за 2 недели" % h2)
-        except ValueError:
-            pass
+            h2_total = float(profile["hours_2wk"] or 0)
+        except (TypeError, ValueError):
+            h2_total = 0.0
+    if h2_total >= 60:
+        score += 0.5
+        flags.append("Интенсивная активность: %.0f ч за 2 недели" % h2_total)
 
     age_days = _account_age_days(profile["member_since"])
     total_focus = sum(h for k, h in profile["hours"].items() if k in ("Rust", "CS2", "Dota 2"))
@@ -363,29 +387,29 @@ def build_card(profile):
         L.append("    Регистрационные данные: %s" % html.escape(profile["realname"]))
     L.append("")
 
-    L.append("⏱️ Часы по играм (за всё время)")
+    L.append("⏱️ Часы в играх")
     if private:
-        L.append("    Скрыто приватностью")
+        L.append("    Приватный профиль — данные скрыты")
     else:
-        hours = profile["hours"]
-        if hours:
-            focus_order = ("Rust", "CS2", "Dota 2")
-            rows = []
-            for k in focus_order:
-                if k in hours:
-                    rows.append("%s: <b>%s</b>" % (k, _fmt_hours(hours[k])))
-            others = sorted(
-                ((k, h) for k, h in hours.items() if k not in focus_order),
-                key=lambda x: -x[1],
-            )[:3]
-            for k, h in others:
-                rows.append("%s: <b>%s</b>" % (html.escape(k), _fmt_hours(h)))
-            rows.append("Всего: <b>%s</b>" % _fmt_hours(sum(hours.values())))
-            L.append("<blockquote>%s</blockquote>" % "\n".join(rows))
+        all_h = profile["hours"]
+        wk_h = profile["weeks_hours"]
+        if not all_h and not wk_h:
+            L.append("    Нет публичных данных о часах")
         else:
-            L.append("    Нет публичных часов")
+            if wk_h:
+                L.append("    За последние 2 недели:")
+                for k in sorted(wk_h, key=lambda x: -wk_h[x])[:6]:
+                    L.append("        %s: <b>%s</b>" % (html.escape(k), _fmt_hours(wk_h[k])))
+            L.append("    За всё время:")
+            for k in ("Rust", "CS2", "Dota 2"):
+                if k in all_h:
+                    L.append("        %s: <b>%s</b>" % (k, _fmt_hours(all_h[k])))
+            others = sorted(((k, h) for k, h in all_h.items() if k not in ("Rust", "CS2", "Dota 2")), key=lambda x: -x[1])[:3]
+            for k, h in others:
+                L.append("        %s: <b>%s</b>" % (html.escape(k), _fmt_hours(h)))
+            L.append("        Всего: <b>%s</b>" % _fmt_hours(sum(all_h.values())))
     if profile["hours_source"] == "recent":
-        L.append("    (часы — за последнюю активность, полный список — со Steam API key)")
+        L.append("    (часы — за последнюю активность, точные данные возможны со Steam API key)")
     state = html.escape(profile["state_message"] or "—")
     L.append("    Последняя активность: %s" % state)
     L.append("")
